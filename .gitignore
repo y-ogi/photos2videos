@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 写真と動画ファイル
+K2動画/
+K2写真/
+K2最終/
+
+# macOS
+.DS_Store 
