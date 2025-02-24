@@ -29,8 +29,25 @@ class VideoFile:
         self.min_gap = 1.0  # クリップ間の最小間隔（秒）
         
     def _extract_timestamp(self) -> str:
-        # DJI_20250205132608 形式からタイムスタンプを抽出
-        return self.path.stem.split('_')[1]
+        """ファイル名からタイムスタンプを抽出
+        
+        以下のような形式に対応：
+        - DJI_20250205132608_0003_D.MP4 -> 20250205132608
+        - その他のファイル -> ファイルの更新日時をYYYYMMDDHHMMSS形式で返す
+        """
+        try:
+            # DJIファイルの場合
+            if self.path.stem.startswith('DJI_'):
+                return self.path.stem.split('_')[1]
+            
+            # その他のファイルの場合は更新日時を使用
+            mtime = self.path.stat().st_mtime
+            dt = datetime.fromtimestamp(mtime)
+            return dt.strftime('%Y%m%d%H%M%S')
+        except (IndexError, ValueError, OSError) as e:
+            print(f"警告: {self.path.name} のタイムスタンプ抽出に失敗: {e}")
+            # 現在時刻を使用
+            return datetime.now().strftime('%Y%m%d%H%M%S')
         
     def get_available_duration(self) -> float:
         """まだ使用可能な合計時間を計算"""
@@ -289,12 +306,26 @@ def main():
             print(f"エラー: 入力ディレクトリ {args.input_dir} が見つかりません")
             sys.exit(1)
 
-        video_files = list(input_dir.glob("*.MP4"))
+        # 対応する動画形式のパターンを定義
+        video_patterns = ["*.mp4", "*.MP4", "*.mov", "*.MOV", "*.avi", "*.AVI", "*.m4v", "*.M4V"]
+        
+        # すべてのパターンで動画ファイルを検索
+        video_files = []
+        for pattern in video_patterns:
+            video_files.extend(list(input_dir.glob(pattern)))
+        
         if not video_files:
             print(f"エラー: {args.input_dir} に動画ファイルが見つかりません")
+            print("対応している動画形式:", ", ".join(pattern[2:].upper() for pattern in video_patterns[::2]))
             sys.exit(1)
 
-        print(f"\n処理開始: {len(video_files)}個の動画ファイルを検出\n")
+        print(f"\n処理開始: {len(video_files)}個の動画ファイルを検出")
+        print("検出された動画形式:")
+        extensions = {f.suffix.lower() for f in video_files}
+        for ext in sorted(extensions):
+            count = sum(1 for f in video_files if f.suffix.lower() == ext)
+            print(f"  {ext}: {count}個")
+        print()
 
         # VideoFileオブジェクトを作成
         video_file_objects = [VideoFile(path) for path in video_files]
