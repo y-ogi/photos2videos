@@ -28,7 +28,6 @@ def create_blurred_background(img, target_width, target_height):
     new_width = (new_width // 2) * 2
     new_height = (new_height // 2) * 2
     scaled_img = cv2.resize(img_cv, (new_width, new_height), interpolation=cv2.INTER_LANCZOS4)
-    
     # ぼかし処理
     blurred = cv2.GaussianBlur(scaled_img, (0, 0), 30)
     
