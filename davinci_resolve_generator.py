@@ -88,21 +88,29 @@ def create_timeline_from_clips(resolve, clips, project_name="Random Clips"):
     timeline.SetSetting('useCustomSettings', '1')
     timeline.SetSetting('timelineResolutionWidth', '3840')
     timeline.SetSetting('timelineResolutionHeight', '2160')
-    timeline.SetSetting('timelineFrameRate', '24')
+    # timeline.SetSetting('timelineFrameRate', '30')
 
     # クリップをタイムラインに追加
-    timeline_items = []
     for clip_info in added_clips:
-        timeline_items.append({
+        # クリップの実際のフレームレートを取得
+        clip_fps = float(clip_info['clip'].GetClipProperty("FPS"))
+        
+        # タイムライン上の位置（0から開始）
+        start_frame = 0
+        end_frame = int(clip_info['duration'] * clip_fps)
+        
+        # 元動画内の開始位置と終了位置
+        source_start = int(clip_info['start'] * clip_fps)
+        source_end = int((clip_info['start'] + clip_info['duration']) * clip_fps)
+        
+        mediaPool.AppendToTimeline([{
             'mediaPoolItem': clip_info['clip'],
-            'startFrame': int(clip_info['start'] * 24),
-            'duration': int(clip_info['duration'] * 24)
-        })
-    result = mediaPool.AppendToTimeline(timeline_items)
-    if not result:
-        print("❌ クリップの一括追加に失敗しました")
-        return False
-
+            'startFrame': start_frame,
+            'endFrame': end_frame,
+            'sourceStart': source_start,
+            'sourceEnd': source_end
+        }])
+    
     print("\n=== タイムラインの作成が完了しました ===")
     return True
 
