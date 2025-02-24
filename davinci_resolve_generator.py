@@ -152,12 +152,20 @@ def create_timeline_from_clips(resolve, clips, project_name="Random Clips"):
     
     print("✓ クリップを追加しました")
     
-    # OK: ProjectオブジェクトのSave()を呼ぶ
-    save_result = project.Save()
-    print(f"プロジェクトの保存結果: {save_result}")
+    # print("project =", project)
+    # print("type(project) =", type(project))
 
-    
-    print("\n=== トランジションの追加 ===")
+    # # OK: ProjectオブジェクトのSave()を呼ぶ
+    # save_result = project.Save()
+    # print(f"プロジェクトの保存結果: {save_result}")
+    projectManager = resolve.GetProjectManager()
+    if callable(getattr(projectManager, "SaveProject", None)):
+        result = projectManager.SaveProject(project)
+        print("プロジェクトの保存結果:", result)
+    else:
+        print("projectManager.SaveProject は存在しません")
+        
+        print("\n=== トランジションの追加 ===")
     
     # 現在のプロジェクトから作成したタイムラインを再取得
     timeline_count = project.GetTimelineCount()
@@ -201,7 +209,12 @@ def create_timeline_from_clips(resolve, clips, project_name="Random Clips"):
             end_val = "呼び出せません"
         
         print(f"  start={start_val}, end={end_val}")
-    
+
+
+    current_page = resolve.GetCurrentPage()
+    print("Current Page:", current_page)
+    print("Timeline attributes:", dir(timeline))
+       
     # トランジションを追加
     print("\n--- クリップ間にトランジションを追加します ---")
     for i in range(len(video_track)-1):
