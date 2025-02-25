@@ -18,10 +18,18 @@
 - フォルダの処理順序をカスタマイズ可能
 - 最終的に全フォルダの動画を1つの動画に結合
 
+### davinci_resolve_generator.py
+- DaVinci Resolveでランダムな動画クリップを使用してタイムラインを生成
+- 指定したフォルダから動画をランダムに選択
+- 各クリップの開始位置をランダムに設定
+- 4Kタイムラインの自動作成
+- メディアプールへのクリップの一括追加
+
 ## 必要条件
 
 - Python 3.8以上
 - FFmpeg
+- DaVinci Resolve Studio（davinci_resolve_generator.pyを使用する場合）
 
 ## インストール
 
@@ -33,6 +41,11 @@ pip install -r requirements.txt
 2. FFmpegがインストールされていることを確認:
 ```bash
 ffmpeg -version
+```
+
+3. DaVinci Resolve Python APIの設定（davinci_resolve_generator.pyを使用する場合）:
+```bash
+source setup_resolve_env.sh
 ```
 
 ## 使用方法
@@ -60,17 +73,60 @@ python combine_videos.py 入力フォルダ 出力フォルダ [--photo-duration
 - `--photo-duration`: 各写真の動画の長さ（秒）。デフォルトは5秒
 - `--folder-order`: フォルダの処理順序を指定（オプション）。指定しない場合はファイル名順
 
-#### 例
+### DaVinci Resolveでタイムラインを生成
+
 ```bash
-# 写真から動画を作成
-python photos2video.py ./photos ./videos --duration 5
-
-# 動画を結合（フォルダ順序を指定）
-python combine_videos.py ./photos ./videos --photo-duration 5 --folder-order folder1 folder2 folder3
-
-# 動画を結合（フォルダ名順）
-python combine_videos.py ./photos ./videos --photo-duration 5
+source setup_resolve_env.sh
+python davinci_resolve_generator.py 入力フォルダ [--clip-duration 秒数] [--total-duration 秒数]
 ```
+
+#### 引数
+- `入力フォルダ`: MP4動画が含まれているフォルダのパス
+- `--clip-duration`: 各クリップの長さ（秒）。デフォルトは5秒
+- `--total-duration`: 完成動画の目標長さ（秒）。デフォルトは60秒
+
+#### 使用手順
+1. DaVinci Resolveを起動し、プロジェクトを開く
+2. スクリプトを実行してタイムラインを生成
+3. 生成されたタイムラインにトランジションを手動で追加
+   - クリップ間の境界をダブルクリック
+   - 「クロスディゾルブ」などの任意のトランジションを選択
+   - 必要に応じてトランジションの長さを調整
+
+## DaVinci Resolve APIの制限事項
+
+現在のDaVinci Resolve APIには以下の制限があります：
+
+1. トランジションの自動追加
+   - APIを通じたトランジションの追加が正常に機能しない
+   - トランジションは手動で追加する必要がある
+   - スクリプトはタイムラインをコピーし、トランジションを追加すべき位置に再生ヘッドを配置する
+
+2. Fusionエフェクト
+   - スクリプトからのFusionエフェクトの完全な制御が困難
+   - 複雑なエフェクトは手動で追加することを推奨
+
+3. プロジェクト設定
+   - 一部のプロジェクト設定がAPIを通じて変更できない
+   - 重要な設定は事前にGUIで設定することを推奨
+
+## トランジションの追加方法
+
+スクリプトを実行すると、以下の2つのタイムラインが作成されます：
+
+1. `Random Timeline YYYYMMDD_HHMMSS`
+   - 選択されたクリップが配置された基本的なタイムライン
+   - トランジションなし
+
+2. `Random Timeline with Transitions YYYYMMDD_HHMMSS`
+   - 上記タイムラインのコピー
+   - トランジションを追加するための準備済み
+
+トランジションを追加するには：
+1. DaVinci Resolveで `Random Timeline with Transitions` タイムラインを開く
+2. タイムライン上でクリップの境界をダブルクリック
+3. 「クロスディゾルブ」などのトランジションを選択
+4. 必要に応じてトランジションの長さを調整
 
 ## 出力仕様
 
@@ -85,4 +141,53 @@ python combine_videos.py ./photos ./videos --photo-duration 5
 - フォルダごとのタイトル画面付き
 - フェードイン/アウトによる遷移効果
 - 個別の動画と同じ品質仕様
-- 最終的に1つの動画ファイルとして出力 
+- 最終的に1つの動画ファイルとして出力
+
+### DaVinci Resolveタイムライン
+- 解像度: 3840x2160 (4K)
+- フレームレート: 24fps
+- ランダムに選択されたクリップで構成
+- トランジションは手動で追加が必要
+
+## 新機能: トランジション
+
+DaVinci Resolve 19でクリップ間にトランジションを追加する機能が追加されました。ただし、DaVinci Resolve APIの制限により、トランジションの自動追加は現在完全には機能しません。
+
+### 使用方法
+
+トランジションを追加するには、以下のコマンドラインオプションを使用します：
+
+```bash
+python davinci_resolve_generator.py 入力フォルダ --add-transitions --transition-duration 24
+```
+
+- `--add-transitions`: クリップ間にトランジションを追加するための準備を行います
+- `--transition-duration`: トランジションの長さをフレーム数で指定します（デフォルト: 24フレーム）
+
+### 制限事項
+
+- **APIの制限**: 現在のDaVinci Resolve APIでは、スクリプトからトランジションを完全に自動で追加することができません
+- **手動追加が必要**: トランジションは手動でDaVinci Resolveのインターフェースから追加する必要があります
+- **解決策**: スクリプトは元のタイムラインをコピーし、トランジションを追加すべき位置に再生ヘッドを配置します
+
+### 手動でトランジションを追加する手順
+
+スクリプトを実行すると、以下の2つのタイムラインが作成されます：
+
+1. `Random Timeline YYYYMMDD_HHMMSS`
+   - 選択されたクリップが配置された基本的なタイムライン
+   - トランジションなし
+
+2. `Random Timeline with Transitions YYYYMMDD_HHMMSS`
+   - 上記タイムラインのコピー
+   - トランジションを追加するための準備済み
+
+トランジションを追加するには：
+1. DaVinci Resolveで `Random Timeline with Transitions` タイムラインを開く
+2. タイムライン上でクリップの境界をダブルクリック
+3. 「クロスディゾルブ」などのトランジションを選択
+4. 必要に応じてトランジションの長さを調整
+
+### 将来の改善
+
+将来のDaVinci Resolve APIのバージョンでは、トランジションの自動追加機能が改善される可能性があります。その場合、スクリプトを更新して完全に自動化されたトランジション追加をサポートする予定です。
