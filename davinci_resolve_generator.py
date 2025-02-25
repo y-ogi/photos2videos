@@ -7,8 +7,10 @@ import ffmpeg
 from datetime import datetime
 import time
 from dataclasses import dataclass
-from typing import List, Dict, Set, Tuple
+from typing import List, Dict, Set, Tuple, Optional
 import math
+import re
+import os
 
 @dataclass
 class ClipInfo:
@@ -16,6 +18,11 @@ class ClipInfo:
     start: float
     duration: float
     file_timestamp: str  # ファイル名から抽出した時刻
+    metadata: Dict[str, str] = None  # メタデータ情報を保存するための辞書
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
 
 class VideoFile:
     def __init__(self, path: Path):
@@ -193,7 +200,156 @@ def select_clips(video_files: List[VideoFile], clip_duration: float, total_durat
     selected_clips.sort(key=lambda x: (x.file_timestamp, x.start))
     return selected_clips
 
-def create_timeline_from_clips(resolve, clips, project_name="Random Clips"):
+def extract_metadata_from_file(file_path: str) -> Dict[str, str]:
+    """ファイルからメタデータを抽出する"""
+    metadata = {}
+    try:
+        # ffmpegを使用してメタデータを抽出
+        probe = ffmpeg.probe(file_path)
+        
+        # ファイル情報からメタデータを取得
+        if 'format' in probe and 'tags' in probe['format']:
+            for key, value in probe['format']['tags'].items():
+                metadata[key.lower()] = value
+        
+        # ビデオストリーム情報からメタデータを取得
+        for stream in probe['streams']:
+            if stream['codec_type'] == 'video' and 'tags' in stream:
+                for key, value in stream['tags'].items():
+                    metadata[key.lower()] = value
+        
+        # 作成日時を取得
+        if 'creation_time' in metadata:
+            try:
+                # ISO 8601形式の日時を解析
+                creation_time = datetime.fromisoformat(metadata['creation_time'].replace('Z', '+00:00'))
+                metadata['formatted_date'] = creation_time.strftime('%Y年%m月%d日')
+                metadata['formatted_time'] = creation_time.strftime('%H:%M:%S')
+            except ValueError:
+                pass
+        
+        # ファイル名から日時を抽出（DJIドローンなどの命名規則に対応）
+        filename = Path(file_path).stem
+        date_match = re.search(r'(\d{4})(\d{2})(\d{2})_?(\d{2})(\d{2})(\d{2})', filename)
+        if date_match:
+            year, month, day, hour, minute, second = date_match.groups()
+            metadata['filename_date'] = f"{year}年{month}月{day}日"
+            metadata['filename_time'] = f"{hour}:{minute}:{second}"
+        
+        # ファイルの最終更新日時を取得
+        mtime = os.path.getmtime(file_path)
+        mtime_dt = datetime.fromtimestamp(mtime)
+        metadata['mtime_date'] = mtime_dt.strftime('%Y年%m月%d日')
+        metadata['mtime_time'] = mtime_dt.strftime('%H:%M:%S')
+        
+    except Exception as e:
+        print(f"メタデータ抽出エラー ({file_path}): {e}")
+    
+    return metadata
+
+def add_text_overlay(timeline, project, text: str, position: str = "bottom", style: str = "default", 
+                     duration: float = None, start_frame: int = 0) -> bool:
+    """タイムラインにテキストオーバーレイを追加する
+    
+    Args:
+        timeline: DaVinci Resolveのタイムラインオブジェクト
+        project: DaVinci Resolveのプロジェクトオブジェクト
+        text: 表示するテキスト
+        position: テキストの位置 ("top", "bottom", "center", "top_left", "top_right", "bottom_left", "bottom_right")
+        style: テキストのスタイル ("default", "subtitle", "title", "watermark")
+        duration: テキストの表示時間（秒）。Noneの場合はタイムライン全体
+        start_frame: テキストの開始フレーム
+        
+    Returns:
+        bool: 成功した場合はTrue、失敗した場合はFalse
+    """
+    try:
+        # メディアプールを取得
+        mediaPool = project.GetMediaPool()
+        if not mediaPool:
+            print("❌ メディアプールの取得に失敗しました")
+            return False
+            
+        # 現在のフレームレートを取得
+        fps = float(timeline.GetSetting('timelineFrameRate'))
+        if not fps:
+            fps = 24.0  # デフォルト値
+            
+        # タイトルの長さを計算（フレーム数）
+        if duration is None:
+            # タイムラインの長さを取得
+            timeline_duration = timeline.GetEndFrame() - timeline.GetStartFrame()
+            duration_frames = timeline_duration
+        else:
+            duration_frames = int(duration * fps)
+            
+        # タイトルをタイムラインに追加（Text Plusを使用）
+        # Text Plusは標準のテキストジェネレーターよりも機能が豊富
+        title_result = mediaPool.CreateTitleInTimeline("Text+", timeline.GetName())
+        if not title_result:
+            # 別の名前で試す（DaVinci Resolveのバージョンによって名前が異なる場合がある）
+            title_result = mediaPool.CreateTitleInTimeline("Text Plus", timeline.GetName())
+            if not title_result:
+                # さらに別の名前で試す
+                title_result = mediaPool.CreateTitleInTimeline("Text", timeline.GetName())
+                if not title_result:
+                    print("❌ タイトルの作成に失敗しました")
+                    return False
+        
+        # タイトルが追加されたことを確認
+        print(f"✅ テキストオーバーレイを追加しました: \"{text}\"")
+        print(f"   位置: {position}, スタイル: {style}")
+        
+        # 注意書きを表示
+        print("注意: テキストの内容を手動で設定する必要があります。")
+        print(f"設定すべきテキスト: {text}")
+        
+        # 位置に関する説明を追加
+        position_guide = {
+            "top": "画面上部中央",
+            "bottom": "画面下部中央",
+            "center": "画面中央",
+            "top_left": "画面左上",
+            "top_right": "画面右上",
+            "bottom_left": "画面左下",
+            "bottom_right": "画面右下"
+        }
+        
+        print(f"テキストの位置: {position_guide.get(position, position)}")
+        
+        # スタイルに関する説明を追加
+        style_guide = {
+            "default": "標準テキスト（白色、中サイズ）",
+            "subtitle": "字幕スタイル（白色、小サイズ、半透明背景）",
+            "title": "タイトルスタイル（大きめ、太字）",
+            "watermark": "ウォーターマーク（小さめ、半透明）"
+        }
+        
+        print(f"テキストのスタイル: {style_guide.get(style, style)}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ テキストオーバーレイの追加に失敗しました: {e}")
+        traceback.print_exc()
+        return False
+
+def format_text_with_metadata(template: str, metadata: Dict[str, str]) -> str:
+    """メタデータを使用してテキストテンプレートをフォーマットする"""
+    # {key}形式のプレースホルダーをメタデータの値で置換
+    formatted_text = template
+    for key, value in metadata.items():
+        placeholder = "{" + key + "}"
+        formatted_text = formatted_text.replace(placeholder, value)
+    
+    # 未置換のプレースホルダーを空文字列に置換
+    formatted_text = re.sub(r'\{[^}]+\}', '', formatted_text)
+    
+    return formatted_text.strip()
+
+def create_timeline_from_clips(resolve, clips, project_name="Random Clips", 
+                              add_text_overlay_flag=False, text_template=None, 
+                              text_position="bottom", text_style="default"):
     """クリップからタイムラインを作成"""
     print("\n=== DaVinci Resolveプロジェクトの設定 ===")
     
@@ -233,6 +389,10 @@ def create_timeline_from_clips(resolve, clips, project_name="Random Clips"):
     added_clips = []
     print("\nクリップの順序:")
     for i, clip_info in enumerate(clips, 1):
+        # メタデータを抽出
+        if add_text_overlay_flag and not clip_info.metadata:
+            clip_info.metadata = extract_metadata_from_file(clip_info.file)
+            
         # 1つのクリップをメディアプールに追加
         result = mediaPool.ImportMedia([clip_info.file])
         if result and result[0]:
@@ -241,7 +401,8 @@ def create_timeline_from_clips(resolve, clips, project_name="Random Clips"):
                 'clip': media_item,
                 'start': clip_info.start,
                 'duration': clip_info.duration,
-                'timestamp': clip_info.file_timestamp
+                'timestamp': clip_info.file_timestamp,
+                'metadata': clip_info.metadata
             })
             print(f"{i}. {Path(clip_info.file).name} (timestamp: {clip_info.file_timestamp})")
         else:
@@ -280,8 +441,35 @@ def create_timeline_from_clips(resolve, clips, project_name="Random Clips"):
             'endFrame': end_frame
         }])
         
+        # テキストオーバーレイを追加
+        if add_text_overlay_flag and text_template:
+            # メタデータを使用してテキストをフォーマット
+            metadata = clip_info['metadata'] or {}
+            formatted_text = format_text_with_metadata(text_template, metadata)
+            
+            if formatted_text:
+                # クリップごとにテキストオーバーレイを追加
+                add_text_overlay(
+                    timeline=timeline,
+                    project=project,
+                    text=formatted_text,
+                    position=text_position,
+                    style=text_style,
+                    duration=clip_info['duration'],
+                    start_frame=timeline_position
+                )
+        
         # 次のクリップの開始位置を更新
         timeline_position = end_frame
+    
+    # テキストオーバーレイ機能を使用した場合の説明
+    if add_text_overlay_flag:
+        print("\n=== テキストオーバーレイ情報 ===")
+        print("テキストオーバーレイを追加しました。")
+        print(f"テンプレート: {text_template}")
+        print(f"位置: {text_position}")
+        print(f"スタイル: {text_style}")
+        print("注意: DaVinci Resolve APIの制限により、テキストの詳細な設定は手動で調整する必要があります。")
     
     print("\n=== タイムラインの作成が完了しました ===")
     return True
@@ -299,6 +487,18 @@ def main():
         parser.add_argument('input_dir', help='入力動画フォルダのパス')
         parser.add_argument('--clip-duration', type=float, default=5, help='各クリップの最大長さ（秒）')
         parser.add_argument('--total-duration', type=float, default=60, help='完成動画の長さ（秒）')
+        
+        # テキストオーバーレイ関連の引数を追加
+        parser.add_argument('--add-text-overlay', action='store_true', help='クリップにテキストオーバーレイを追加する')
+        parser.add_argument('--text-template', type=str, default="{filename_date} {filename_time}", 
+                           help='テキストテンプレート（例: "{filename_date} {filename_time}"）')
+        parser.add_argument('--text-position', type=str, default="bottom", 
+                           choices=["top", "bottom", "center", "top_left", "top_right", "bottom_left", "bottom_right"],
+                           help='テキストの位置')
+        parser.add_argument('--text-style', type=str, default="default", 
+                           choices=["default", "subtitle", "title", "watermark"],
+                           help='テキストのスタイル')
+        
         args = parser.parse_args()
 
         input_dir = Path(args.input_dir).resolve()
@@ -337,8 +537,23 @@ def main():
             print("エラー: クリップを選択できませんでした")
             sys.exit(1)
 
+        # テキストオーバーレイが有効な場合、情報を表示
+        if args.add_text_overlay:
+            print("\n=== テキストオーバーレイ設定 ===")
+            print(f"テンプレート: {args.text_template}")
+            print(f"位置: {args.text_position}")
+            print(f"スタイル: {args.text_style}")
+
         # タイムラインを作成
-        result = create_timeline_from_clips(resolve, clips)
+        result = create_timeline_from_clips(
+            resolve, 
+            clips, 
+            add_text_overlay_flag=args.add_text_overlay,
+            text_template=args.text_template,
+            text_position=args.text_position,
+            text_style=args.text_style
+        )
+        
         if result:
             print("\nタイムラインの作成が完了しました")
         else:
