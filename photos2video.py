@@ -165,6 +165,10 @@ def main():
     if not jpg_files:
         print(f"警告: {input_dir}内にJPG画像が見つかりませんでした。")
         return
+    
+    # 明示的にファイル名順でソート
+    jpg_files.sort(key=lambda x: x.name)
+    print(f"ファイル名順にソートしました。")
         
     print(f"合計{len(jpg_files)}枚の画像を処理します。")
     
