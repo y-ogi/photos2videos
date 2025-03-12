@@ -7,6 +7,16 @@ from PIL import Image
 import ffmpeg
 from pathlib import Path
 from PIL import ExifTags
+try:
+    from pillow_heif import register_heif_opener
+    # HEICファイルをPILで開けるようにする
+    register_heif_opener()
+    HEIF_SUPPORT = True
+    print("HEICファイルのサポートが有効です")
+except ImportError:
+    HEIF_SUPPORT = False
+    print("警告: pillow-heifがインストールされていないため、HEICファイルはサポートされません")
+    print("HEICファイルをサポートするには: pip install pillow-heif")
 
 def create_blurred_background(img, target_width, target_height):
     """ぼかし背景を作成する関数"""
@@ -157,22 +167,28 @@ def main():
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
     
-    # 入力フォルダ内のすべてのJPGファイルを処理（大文字小文字を区別しない）
-    jpg_files = []
+    # 入力フォルダ内のすべての画像ファイルを処理（大文字小文字を区別しない）
+    image_files = []
+    # JPG/JPEG画像を検索
     for ext in ['*.jpg', '*.JPG', '*.jpeg', '*.JPEG']:
-        jpg_files.extend(list(input_dir.rglob(ext)))
+        image_files.extend(list(input_dir.rglob(ext)))
     
-    if not jpg_files:
-        print(f"警告: {input_dir}内にJPG画像が見つかりませんでした。")
+    # HEICファイルのサポートが有効な場合、HEICファイルも検索
+    if HEIF_SUPPORT:
+        for ext in ['*.heic', '*.HEIC']:
+            image_files.extend(list(input_dir.rglob(ext)))
+    
+    if not image_files:
+        print(f"警告: {input_dir}内に対応画像が見つかりませんでした。")
         return
     
     # 明示的にファイル名順でソート
-    jpg_files.sort(key=lambda x: x.name)
+    image_files.sort(key=lambda x: x.name)
     print(f"ファイル名順にソートしました。")
         
-    print(f"合計{len(jpg_files)}枚の画像を処理します。")
+    print(f"合計{len(image_files)}枚の画像を処理します。")
     
-    for img_path in jpg_files:
+    for img_path in image_files:
         # 出力パスを作成（フォルダ構造を維持）
         relative_path = img_path.relative_to(input_dir)
         output_path = output_dir / relative_path.parent / relative_path.stem
